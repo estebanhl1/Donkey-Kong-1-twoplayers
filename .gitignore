@@ -1,0 +1,27 @@
+# ROMs y archivos derivados (copyright de Nintendo/Rare): NO subir
+*.sfc
+*.smc
+*.srm
+*.000
+*.undo
+*.state
+roms/
+work/
+
+# Desensamblado: es otro repo (https://github.com/Yoshifanatic1/Donkey-Kong-Country-1-Disassembly)
+disasm/
+
+# Herramientas descargadas o compiladas (ver README, "Preparar el entorno")
+tools/venv/
+tools/mesen/
+tools/asar_src/
+tools/asar_rel/
+tools/asar
+tools/*.zip
+tools/*.so
+tools/libretro.h
+tools/settings.json
+
+# Python
+__pycache__/
+*.pyc

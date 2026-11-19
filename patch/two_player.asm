@@ -1414,3 +1414,5 @@ P2_LeadMountWatch:
 	RTS
 
 print "Codigo nuevo termina en: ", pc
+
+incsrc splash.asm             ; pantalla inicial (dedicatoria + link del repo)

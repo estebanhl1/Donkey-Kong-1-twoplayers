@@ -7,6 +7,8 @@ que permite que el **control 2 maneje al Kong compañero** al mismo tiempo que e
 1. Abrir `Donkey Kong Country 2P (prototipo).sfc` en un emulador con 2 controles configurados
    (por ejemplo Snes9x: `flatpak install flathub com.snes9x.Snes9x`).
    También se puede aplicar `dkc_2p.ips` a tu ROM original.
+   Al encender aparece una pantalla con la dedicatoria y el link del repo: cualquier botón sigue
+   (o sola a los ~20 s). Está en `patch/splash.asm`.
 2. Elegir **"Two player team"** en el menú: es el modo **co-op**.
    - "One player" y "Two player contest" quedan **exactamente como el juego original**.
 3. Al empezar cada nivel, Diddy aparece solo a los pocos segundos (no hace falta el barril DK). Desde ahí:

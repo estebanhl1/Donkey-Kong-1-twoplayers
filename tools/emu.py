@@ -50,7 +50,7 @@ class retro_log_callback(C.Structure):
 
 
 class Emu:
-    def __init__(self, rom, core=CORE):
+    def __init__(self, rom, core=CORE, skip_splash=True):
         self.lib = C.CDLL(core)
         self.held = {1: set(), 2: set()}
         self.frame = None
@@ -85,6 +85,24 @@ class Emu:
         if not ptr:
             raise RuntimeError('el nucleo no expone la WRAM (RETRO_MEMORY_SYSTEM_RAM)')
         self.ram = (C.c_uint8 * size).from_address(ptr)
+        if skip_splash:
+            self.skip_splash()
+
+    def skip_splash(self):
+        """Si la ROM tiene la pantalla inicial (patch/splash.asm: JML en el reset), la salta con START
+        para que el arranque quede igual que en la ROM original (self.frames vuelve a 0)."""
+        if self.romdata[0x8000] != 0x5C:
+            return
+        for _ in range(300):
+            self.run(1)
+            if self.ram[0x4C0] == 0x5A:
+                break
+        self.run(50)                                  # tiempo minimo antes de aceptar botones
+        self.set_buttons(1, "START")
+        while self.ram[0x4C0] == 0x5A:
+            self.run(1)
+        self.set_buttons(1)
+        self.frames = 0
 
     # --- callbacks ---
     def _env(self, cmd, data):

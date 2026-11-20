@@ -59,6 +59,10 @@ Estado: ✅ hecho · ⬜ pendiente · ❓ hay que verificar cómo se comporta ho
   (se probó un animal por jugador: funciona pero la etapa se atrasaba el 36% de los frames contra 7% del original;
   dejando la mitad de las fichas con valor doble seguía en 32%: el costo es el segundo Kong con su animal, no las fichas)
 
+- ✅ v1.4: más separación entre los Kongs: el compañero puede salir hasta ~80 px de la pantalla (su número parpadea en el
+  borde); la cámara sigue el punto medio con límite para que el líder siempre se vea. (Alejar la cámara con zoom no es
+  posible en el SNES: la imagen es de escala fija y DKC usa varias capas de fondo.)
+
 ## Revisión de mundos (2026-11-19)
 40 niveles de los 6 mundos, jefes y Gangplank Galleon (`tools/survey.py`): en todos están los 2 Kongs, el P2 mueve al suyo y nada se congela.
 

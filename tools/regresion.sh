@@ -54,7 +54,9 @@ for c in reaparecer_en_checkpoint:"reaparecer en el checkpoint con un solo Kong 
          indicador_1p_2p:"indicador 1/2 y banana del lider al intercambiar" \
          vagoneta_salta_con_p2:"vagoneta: el B del P2 hace saltar el carro" \
          animales_sin_duplicar:"bajarse y subirse no crea animales de mas" \
-         bonus_animales_turnarse:"bonus de animales: con A el animal pasa al otro jugador"; do
+         bonus_animales_turnarse:"bonus de animales: con A el animal pasa al otro jugador" \
+         companero_fuera_con_numero_en_borde:"el companero puede salir de la pantalla y su numero sale en el borde" \
+         numero_borde_izquierdo_a_su_altura:"borde izquierdo: el numero a la altura del Kong"; do
   echo "$r" | grep -q "^OK ${c%%:*}" && ok "${c#*:}" || { bad "${c#*:}"; echo "$r" | grep "${c%%:*}"; }
 done
 

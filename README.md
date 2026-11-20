@@ -13,7 +13,8 @@ que permite que el **control 2 maneje al Kong compañero** al mismo tiempo que e
    - "One player" y "Two player contest" quedan **exactamente como el juego original**.
 3. Al empezar cada nivel, Diddy aparece solo a los pocos segundos (no hace falta el barril DK). Desde ahí:
    - El **P2 se une apretando cualquier botón**. Con el P2 unido: **control 1 = DK**, **control 2 = Diddy**.
-     La cámara sigue el punto medio de los dos Kongs (si se separan, el borde de pantalla los mantiene juntos).
+     La cámara sigue el punto medio de los dos Kongs sin dejar al líder fuera. El otro puede alejarse hasta ~80 px
+     fuera de la pantalla: mientras está fuera, su número (1/2) parpadea en el borde a su altura.
      Cualquiera de los dos puede pausar y quitar la pausa con Start.
    - **Botón A:** con los dos Kongs presentes, cualquiera de los dos jugadores aprieta A y **se intercambian
      los personajes** (el que tenía a DK pasa a Diddy y viceversa). Nadie se mueve de lugar.

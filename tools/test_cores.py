@@ -39,7 +39,9 @@ e.set_buttons(2, 'LEFT'); e.set_buttons(1, 'RIGHT'); e.run(60)
 dk, di = e.r16(0xB1B), e.r16(0xB1D)
 check('P2 se une y mueve a Diddy por separado', e.r16(0x4F0) == 1 and di < dk - 0x30, 'DK %04X Diddy %04X' % (dk, di))
 cam = e.r16(0x1A62); sdk = (dk - cam) & 0xFFFF; sdi = (di - cam) & 0xFFFF
-check('camara compartida: los dos en pantalla', sdk < 256 and sdi < 256, 'DK x%d Diddy x%d' % (sdk, sdi))
+s16 = lambda v: v - 0x10000 if v & 0x8000 else v
+# v1.4: el lider siempre en pantalla; el companero puede quedar hasta 0x50 px fuera (su numero sale en el borde)
+check('camara compartida: lider en pantalla y companero cerca', sdk < 256 and -0x50 <= s16(sdi) <= 256 + 0x50, 'DK x%d Diddy x%d' % (s16(sdk), s16(sdi)))
 e.set_buttons(2, 'UP'); e.set_buttons(1, 'RIGHT')
 seen = set(); back = False
 for f in range(700):

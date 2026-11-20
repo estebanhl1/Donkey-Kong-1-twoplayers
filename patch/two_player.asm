@@ -81,6 +81,7 @@ hirom
 !OtherBox      = $04A0       ; caja de Diddy mientras se revisan las bananas con la de DK (4 palabras)
 !DKBoxValid    = $04BA       ; 1 = !DKBox es de este frame
 !BananaToggle  = $04BC       ; alterna la caja usada para las bananas sueltas
+!EdgeOnly      = $04D0       ; 1 = este frame solo se dibujan los numeros en el borde (Kong fuera de pantalla)
 !TagTimer      = $04BE       ; frames que quedan mostrando "1"/"2" sobre los Kongs
 !TouchMode     = $04F8       ; CODE_BBA64A: 0 normal (lider y luego companero), 1 solo lider, 2 solo companero
 
@@ -702,28 +703,7 @@ P2_KeepNearLead:
 ; (X = indice del companero, DB = $7E)
 ; -----------------------------------------------------------------------------
 P2_ClampToScreen:
-	; Se compara la posicion RELATIVA a la camara con signo: la camara puede
-	; valer p.ej. $FFEE al inicio de un nivel (un poco "negativa").
-	LDA.w !SprXPos,x
-	SEC
-	SBC.w !CameraX               ; A = X en pantalla (con signo)
-	BMI .left
-	CMP.w #!EdgeMargin
-	BCC .left
-	CMP.w #256-!EdgeMargin+1
-	BCC .done                    ; dentro de la pantalla
-	LDA.w !CameraX               ; borde derecho
-	CLC
-	ADC.w #256-!EdgeMargin
-	BRA .set
-.left
-	LDA.w !CameraX               ; borde izquierdo
-	CLC
-	ADC.w #!EdgeMargin
-.set
-	STA.w !SprXPos,x
-	STZ.w !SprXSpeed,x
-.done
+	JSL P2_ClampWide             ; (banco $EE)
 	RTS
 
 ; -----------------------------------------------------------------------------
@@ -1365,12 +1345,7 @@ P2_Camera:
 	PEA $7E7E
 	PLB
 	PLB                          ; DB = $7E
-	LDA.w !SprXPos,y
-	STA.w !SaveLeadX
-	CLC
-	ADC.w !SprXPos,x
-	ROR                          ; (lider + companero) / 2 (con el acarreo)
-	STA.w !SprXPos,y
+	JSL P2_MidX                  ; X del lider = punto medio (con limite) (banco $EE)
 	PLB                          ; DB original para la rutina del juego
 	PHB
 .call
@@ -1392,19 +1367,7 @@ P2_Camera:
 	TYX
 	STA.l $7E0000+!SprXPos,x
 	PLX
-	; vertical: Y del lider = punto medio
-	PHX
-	TYX
-	LDA.l $7E0000+!SprYPos,x
-	STA.l $7E0000+!SaveLeadY
-	PLX
-	CLC
-	ADC.l $7E0000+!SprYPos,x
-	ROR
-	PHX
-	TYX
-	STA.l $7E0000+!SprYPos,x
-	PLX
+	JSL P2_MidY                  ; vertical: Y del lider = punto medio (con limite)
 .vert
 	PHB
 	PHK
@@ -1618,17 +1581,16 @@ P2_BananasAndTags:
 	RTL
 
 .tags
-	LDA.l $7E0000+!CurrentKong   ; cambio de lider -> mostrar el indicador
-	CMP.l $7E0000+!PrevLeadTag
-	BEQ +
-	STA.l $7E0000+!PrevLeadTag
-	LDA.w #120
-	STA.l $7E0000+!TagTimer
-+
-	LDA.l $7E0000+!TagTimer
-	BEQ .done
+	LDA.l $7E0000+!TagTimer      ; sin indicador activo: igual se dibuja el
+	BEQ .edge                    ; numero en el borde si un Kong esta fuera
 	DEC
 	STA.l $7E0000+!TagTimer
+	LDA.w #$0000
+	BRA .mode
+.edge
+	LDA.w #$0001
+.mode
+	STA.l $7E0000+!EdgeOnly
 	LDA.l $7E0000+!P2Joined
 	BEQ .done
 	LDA.l $7E0000+!PartnerFlags  ; solo con los dos Kongs (salvo en las
@@ -1667,10 +1629,38 @@ P2_BananasAndTags:
 	SBC.l $7E088B                ; Layer1XPos
 	SEC
 	SBC.w #$0008
+	STZ.b $7E                    ; 0 = en pantalla
 	CMP.w #$00F0
-	BCC ++
+	BCC .onscreen
+	; fuera de pantalla: el numero va en el borde, parpadeando
+	TAY
+	LDA.b $28
+	AND.w #$0010
+	BEQ ++
 	JMP .r
 ++
+	INC.b $7E                    ; 1 = fuera de pantalla
+	LDA.w #$0020                 ; a la altura del cuerpo
+	STA.b $70
+	TYA
+	BMI +
+	LDA.w #$00EA                 ; borde derecho (X - 8 + 4 = $EE)
+	BRA ++
++
+	LDA.w #$0000                 ; borde izquierdo (X = 4; con $FFFE el $FF se
+	                             ; mezclaba con la Y y el numero quedaba arriba)
+++
+	BRA .xok
+.onscreen
+	TAY
+	LDA.l $7E0000+!EdgeOnly
+	BEQ +
+	JMP .r
++
+	LDA.w #$0040                 ; sobre la cabeza
+	STA.b $70
+	TYA
+.xok
 	STA.b $7A                    ; X - 8
 	; Y en pantalla: $4A - Y - Layer1YPos (pies); el digito 0x40 mas arriba
 	LDA.b $4A
@@ -1679,17 +1669,24 @@ P2_BananasAndTags:
 	SEC
 	SBC.l $7E0895
 	SEC
-	SBC.w #$0040
+	SBC.b $70
 	STA.b $7C
 	JSL P2_BonusSolo             ; etapas de animales: el Kong escondido queda mas
 	LDA.b $7C                    ; abajo que el animal -> 0x30 mas arriba
 	BCC +
 	SBC.w #$0030
 +
-	CMP.w #$00D0
-	BCS .r
+	BPL +
+	LDA.w #$0012                 ; muy arriba: pegado al borde de arriba
++
+	CMP.w #$00C8
+	BCC +
+	LDA.w #$00C7                 ; muy abajo: pegado al borde de abajo
++
 	CMP.w #$0012
-	BCC .r                       ; muy arriba (no cabe la banana)
+	BCS +
+	LDA.w #$0012
++
 	STA.b $7C                    ; Y del digito
 	LDY.b $8E                    ; siguiente entrada libre del buffer de OAM
 	CPY.w #$03F0
@@ -1723,7 +1720,9 @@ P2_BananasAndTags:
 	INY
 	INY
 	INY
-	; lider: banana girando arriba del digito (16x16)
+	; lider: banana girando arriba del digito (16x16), si esta en pantalla
+	LDA.b $7E
+	BNE .end
 	TXA
 	LSR
 	CMP.l $7E0000+!CurrentKong
@@ -2431,6 +2430,13 @@ P2_BonusSolo:
 
 ; Una vez por frame (antes del indicador).
 P2_BonusFrame:
+	LDA.l $7E0000+!CurrentKong   ; cambio de lider -> mostrar el indicador 1/2
+	CMP.l $7E0000+!PrevLeadTag
+	BEQ +
+	STA.l $7E0000+!PrevLeadTag
+	LDA.w #120
+	STA.l $7E0000+!TagTimer
++
 	JSR P2_InAnimalBonus
 	BCC .done
 	LDA.l $7E0000+!P2Joined
@@ -2460,4 +2466,100 @@ P2_BonusFrame:
 
 print "Bloque animales termina en: ", pc
 warnpc $D30000
+
+; =============================================================================
+; v1.4: mas espacio entre los Kongs. El companero puede salir hasta ~80 px de
+; la pantalla por cada lado (antes el borde lo frenaba); la camara sigue el
+; punto medio pero sin dejar al lider fuera; el numero 1/2 del que queda fuera
+; se dibuja en el borde (ver el indicador). (espacio libre $EEFF6F-$EEFFFF)
+; =============================================================================
+!WideMargin = $0050
+!MidMaxX    = $0090          ; el punto medio se calcula con el companero a lo sumo a esta distancia del lider
+!MidMaxY    = $0050
+
+org $EEFF70
+; X = companero (DB = $7E)
+P2_ClampWide:
+	LDA.w !SprXPos,x
+	SEC
+	SBC.w !CameraX               ; X en pantalla (con signo)
+	CLC
+	ADC.w #!WideMargin
+	BMI .left
+	CMP.w #256+!WideMargin+!WideMargin
+	BCC .done
+	LDA.w !CameraX               ; derecha
+	CLC
+	ADC.w #256+!WideMargin
+	BRA .set
+.left
+	LDA.w !CameraX
+	SEC
+	SBC.w #!WideMargin
+.set
+	STA.w !SprXPos,x
+	STZ.w !SprXSpeed,x
+.done
+	RTL
+
+; A = d (companero - lider, con signo), $74 = limite -> A = d/2 limitado
+P2_HalfClamped:
+	BMI .neg
+	CMP.b $74
+	BCC .half
+	LDA.b $74
+	BRA .half
+.neg
+	EOR.w #$FFFF
+	INC
+	CMP.b $74
+	BCC +
+	LDA.b $74
++
+	EOR.w #$FFFF
+	INC
+.half
+	CMP.w #$8000                 ; division con signo
+	ROR
+	RTS
+
+; X = companero, Y = lider (DB = $7E)
+P2_MidX:
+	LDA.w !SprXPos,y
+	STA.w !SaveLeadX
+	LDA.w #!MidMaxX
+	STA.b $74
+	LDA.w !SprXPos,x
+	SEC
+	SBC.w !SprXPos,y
+	JSR P2_HalfClamped
+	CLC
+	ADC.w !SprXPos,y
+	STA.w !SprXPos,y
+	RTL
+
+; X = companero, Y = lider (cualquier DB)
+P2_MidY:
+	PHX
+	TYX
+	LDA.l $7E0000+!SprYPos,x
+	STA.l $7E0000+!SaveLeadY
+	STA.b $72
+	PLX
+	LDA.w #!MidMaxY
+	STA.b $74
+	LDA.l $7E0000+!SprYPos,x
+	SEC
+	SBC.b $72
+	JSR P2_HalfClamped
+	CLC
+	ADC.b $72
+	PHX
+	TYX
+	STA.l $7E0000+!SprYPos,x
+	PLX
+	RTL
+
+print "Bloque v1.4 termina en: ", pc
+warnpc $EF0000
 

@@ -361,6 +361,13 @@ en el emulador las combinaciones funcionan para los dos jugadores (verificado 20
   escondido queda más abajo que el animal). Con dos animales la etapa se atrasaba 36% de frames (original 7%).
 - **Indicador:** se dibuja ANTES que las bananas sueltas (si no, con muchas bananas el buffer de OAM se llenaba).
 
+## 6f-quater. v1.4: más separación (verificado 2026-11-20)
+- `P2_ClampWide` (`$EEFF70`): el compañero puede quedar hasta `$50` px fuera de la pantalla (antes 12 px adentro).
+- `P2_MidX` / `P2_MidY`: el punto medio de la cámara se calcula con el compañero a lo sumo a `$90` (X) / `$50` (Y) del líder,
+  así el líder queda siempre en pantalla.
+- Indicador: si un Kong está fuera, su número se dibuja en el borde (X = 2 o `$EE`), parpadeando (bit 4 de `$28`), aunque no
+  haya indicador activo (`$04D0` = solo borde).
+
 ## 6j. Cámara, pausa, intercambio y ralentización (verificado 2026-11-19)
 - **Cámara:** `CODE_809BEC` decide qué Kong sigue (Y = líder, salvo `$1E29`).
   - `CODE_809CD0` calcula la X objetivo (`$1A5E`) con `XPos,y`, `XSpeed,y`, `$0DB9,y` y la anticipación `$1A69`.

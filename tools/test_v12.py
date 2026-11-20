@@ -174,3 +174,25 @@ a = (salta(1), salta(2))
 e.set_buttons(1, 'A'); e.run(3); e.set_buttons(1); e.run(30)
 b = (salta(1), salta(2))
 report('bonus_animales_turnarse', a == (True, False) and b == (False, True), '(antes %s, despues de A %s)' % (a, b))
+
+# 16) v1.4: el companero puede salir de la pantalla (hasta 0x50 px) y su numero aparece en el borde
+e = load('work/1p_twokongs.state'); e.set_buttons(2, 'UP'); e.run(5); e.set_buttons(2); e.run(150)
+seen_edge = False; maxout = 0
+for f in range(240):
+    e.set_buttons(1, *(['LEFT'] if f < 120 else [])); e.set_buttons(2, 'RIGHT', 'Y'); e.run(1)
+    for k in (2, 4): e.w16(0x1595 + k, 0)
+    cam = e.r16(0x1A62); sdi = (e.r16(0xB1D) - cam) & 0xFFFF; sdk = (e.r16(0xB1B) - cam) & 0xFFFF
+    maxout = max(maxout, sdi - 256 if sdi < 0x8000 else 0)
+    if sdi >= 256 and any(e.ram[0x202 + 4*i] == 0x68 and e.ram[0x200 + 4*i] >= 0xE8 for i in range(128)): seen_edge = True
+report('companero_fuera_con_numero_en_borde', seen_edge and 0 < maxout <= 0x58 and sdk < 256, '(fuera %d px)' % maxout)
+
+# 17) v1.4: hacia la IZQUIERDA el numero queda a la altura del cuerpo (antes se iba arriba de todo)
+e = load('work/1p_twokongs.state'); e.set_buttons(2, 'UP'); e.run(5); e.set_buttons(2); e.run(150)
+ok = False
+for f in range(200):
+    e.set_buttons(1, 'RIGHT'); e.set_buttons(2, 'LEFT', 'Y'); e.run(1)
+    for k in (2, 4): e.w16(0x1595 + k, 0)
+    feet = (e.r16(0x4A) - e.r16(0xBC5) - e.r16(0x895)) & 0xFFFF
+    for i in range(128):
+        if e.ram[0x202 + 4*i] == 0x68 and e.ram[0x200 + 4*i] == 4 and abs(e.ram[0x201 + 4*i] - (feet - 0x20)) < 12: ok = True
+report('numero_borde_izquierdo_a_su_altura', ok)

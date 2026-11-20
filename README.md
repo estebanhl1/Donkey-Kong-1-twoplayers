@@ -20,6 +20,8 @@ que permite que el **control 2 maneje al Kong compañero** al mismo tiempo que e
    - **Indicador:** por ~2 s (al unirse el P2, al apretar A o al cambiar el líder) aparece un **1** o un **2**
      sobre cada Kong (qué jugador lo maneja) y una **banana girando** sobre el líder ("el que manda").
    - **Vagonetas:** el B de cualquiera de los dos jugadores hace saltar el carro.
+   - **Etapas de bonus de animales** (al juntar 3 fichas): un solo animal, como en el original. Con A (cualquiera de
+     los dos) el animal pasa al otro jugador; el número 1/2 sobre el animal dice quién lo maneja.
    - Si el P2 no toca el control por ~4 s, se "va" y el juego vuelve a ser el original
      (P1 maneja al líder, el compañero lo sigue solo, A intercambia).
    - Con el P2 unido, el Kong del P2 también pelea (pisar o rodar sobre enemigos), recibe golpes y recoge

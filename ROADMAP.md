@@ -55,6 +55,9 @@ Estado: ✅ hecho · ⬜ pendiente · ❓ hay que verificar cómo se comporta ho
 - ✅ v1.3: si cae el líder a un hoyo, el otro sigue (antes el rescate vertical lo arrastraba al hoyo y se perdía una vida);
   indicador 1/2 + banana del líder; en la vagoneta salta el carro con el B de cualquiera de los dos
 - ✅ v1.3.1: bajarse y subirse a los animales ya no crea animales de más (máximo 2); el indicador se dibuja antes que las bananas
+- ✅ v1.3.2: etapas de animales: un solo animal que se pasan con A, con el número 1/2 siempre visible
+  (se probó un animal por jugador: funciona pero la etapa se atrasaba el 36% de los frames contra 7% del original;
+  dejando la mitad de las fichas con valor doble seguía en 32%: el costo es el segundo Kong con su animal, no las fichas)
 
 ## Revisión de mundos (2026-11-19)
 40 niveles de los 6 mundos, jefes y Gangplank Galleon (`tools/survey.py`): en todos están los 2 Kongs, el P2 mueve al suyo y nada se congela.

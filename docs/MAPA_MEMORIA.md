@@ -355,6 +355,10 @@ en el emulador las combinaciones funcionan para los dos jugadores (verificado 20
   líder que se sube) ni el segundo de una caja si ya hay 2 animales libres o montados (los que huyen, estado 2, no cuentan).
   Si el compañero a pie tiene un animal libre a menos de `$80` px, se lo deja caer encima (`P2_DropOnFreeAnimal`).
   Antes, bajarse y volver a subirse sumaba un animal cada vez.
+- **Etapas de animales** (entradas `$D2` `$D3` `$6C` `$A6`, `$34`): el Kong líder "es" el animal (estado `$14`, el sprite del animal
+  queda en estado 7 en 0,0) y A no hace nada en el original. Parche (`P2_BonusFrame`): un solo animal; con el P2 unido el A recién
+  apretado de cualquier control (`$0504`/`$0506` bit `$0080`) invierte `$04C4`. El indicador va 0x30 px más arriba (el Kong
+  escondido queda más abajo que el animal). Con dos animales la etapa se atrasaba 36% de frames (original 7%).
 - **Indicador:** se dibuja ANTES que las bananas sueltas (si no, con muchas bananas el buffer de OAM se llenaba).
 
 ## 6j. Cámara, pausa, intercambio y ralentización (verificado 2026-11-19)

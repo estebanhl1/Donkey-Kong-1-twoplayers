@@ -160,3 +160,17 @@ for cycle in range(3):
         mx = max(mx, len([s for s in range(3, 26) if 9 <= e.r16(0xD45 + 2*s) <= 0xC]))
     e.set_buttons(2)
 report('animales_sin_duplicar', mx <= 2, '(maximo %d)' % mx)
+
+# 15) Etapa de animales: un solo animal; con A pasa de un jugador al otro (salta con el B del que lo tiene)
+e = warp(rom, 0xD2, frames_after=0)
+e.set_buttons(2, 'UP'); e.run(5); e.set_buttons(2); e.run(100)
+def salta(pad):
+    snap = e.save_state(); j = False
+    for f in range(20):
+        e.set_buttons(pad, *(['B'] if f < 4 else [])); e.run(1)
+        if e.r16(0x102B) == 0x15: j = True
+    e.set_buttons(pad); e.load_state(snap); return j
+a = (salta(1), salta(2))
+e.set_buttons(1, 'A'); e.run(3); e.set_buttons(1); e.run(30)
+b = (salta(1), salta(2))
+report('bonus_animales_turnarse', a == (True, False) and b == (False, True), '(antes %s, despues de A %s)' % (a, b))

@@ -565,19 +565,10 @@ P2_UpdateRespawn:
 	LDA.w !PartnerFlags
 	AND.w #$0001
 	BNE .reset                   ; ya hay companero
-	; Etapas de bonus de animales (fichas): se juega con un solo animal y sin
-	; el otro Kong, como en el original. No traerlo.
-	LDA.b $3E                    ; entrada actual
-	CMP.w #$00D2                 ; Rambi
-	BEQ .reset
-	CMP.w #$00D3                 ; Winky
-	BEQ .reset
-	CMP.w #$006C                 ; Expresso
-	BEQ .reset
-	CMP.w #$00A6                 ; Enguarde
-	BEQ .reset
-	CMP.w #$0034                 ; (prueba de fichas)
-	BEQ .reset
+	; Etapas de bonus de animales (fichas): con el P2 sin jugar, un solo animal
+	; y sin el otro Kong, como en el original (P2_BonusSolo, banco $D2).
+	JSL P2_BonusSolo
+	BCS .reset
 	LDA.w !CurrentKong
 	BEQ .reset
 	CMP.w #$0003
@@ -1620,6 +1611,8 @@ P2_BananasAndTags:
 	; el indicador va ANTES que las bananas sueltas: si hay muchas, el buffer de
 	; OAM se llena y el indicador no alcanzaba a dibujarse
 	REP #$30
+	JSL P2_BonusFrame            ; etapas de animales con el P2 (banco $D2)
+	REP #$30
 	JSR .tags
 	JSL P2_Bananas
 	RTL
@@ -1638,9 +1631,12 @@ P2_BananasAndTags:
 	STA.l $7E0000+!TagTimer
 	LDA.l $7E0000+!P2Joined
 	BEQ .done
-	LDA.l $7E0000+!PartnerFlags  ; solo con los dos Kongs
-	AND.w #$0001
-	BEQ .done
+	LDA.l $7E0000+!PartnerFlags  ; solo con los dos Kongs (salvo en las
+	AND.w #$0001                 ; etapas de animales: un solo animal)
+	BNE +
+	JSL P2_BonusSolo
+	BCC .done
++
 	LDX.w #$0002                 ; DK
 	JSR .one
 	LDX.w #$0004                 ; Diddy
@@ -1684,6 +1680,12 @@ P2_BananasAndTags:
 	SBC.l $7E0895
 	SEC
 	SBC.w #$0040
+	STA.b $7C
+	JSL P2_BonusSolo             ; etapas de animales: el Kong escondido queda mas
+	LDA.b $7C                    ; abajo que el animal -> 0x30 mas arriba
+	BCC +
+	SBC.w #$0030
++
 	CMP.w #$00D0
 	BCS .r
 	CMP.w #$0012
@@ -2394,6 +2396,66 @@ P2_DropOnFreeAnimal:
 .done
 	PLY
 	PLX
+	RTL
+
+; -----------------------------------------------------------------------------
+; Etapas de bonus de animales (3 fichas): Rambi $D2, Winky $D3, Expresso $6C,
+; Enguarde $A6 (y la de prueba $34). Como en el original: un solo animal (el
+; Kong lider "es" el animal) y el otro Kong ausente; con dos animales la etapa
+; se ponia muy lenta. Con el P2 jugando: el A de cualquiera de los dos le pasa
+; el animal al otro jugador, y el numero 1/2 queda visible toda la etapa.
+; -----------------------------------------------------------------------------
+; carry = 1 si estamos en una etapa de animales
+P2_InAnimalBonus:
+	LDA.b $3E
+	CMP.w #$00D2
+	BEQ .yes
+	CMP.w #$00D3
+	BEQ .yes
+	CMP.w #$006C
+	BEQ .yes
+	CMP.w #$00A6
+	BEQ .yes
+	CMP.w #$0034
+	BEQ .yes
+	CLC
+	RTS
+.yes
+	SEC
+	RTS
+
+; carry = 1 en una etapa de animales (no traer al otro Kong). (JSL)
+P2_BonusSolo:
+	JSR P2_InAnimalBonus
+	RTL
+
+; Una vez por frame (antes del indicador).
+P2_BonusFrame:
+	JSR P2_InAnimalBonus
+	BCC .done
+	LDA.l $7E0000+!P2Joined
+	BEQ .done
+	LDA.l $7E0000+!TagTimer      ; indicador siempre visible
+	CMP.w #$0002
+	BCS +
+	LDA.w #$0002
+	STA.l $7E0000+!TagTimer
++
+	; A (recien apretado) de cualquiera de los dos: el animal pasa al otro jugador
+	LDA.l $7E0504
+	ORA.l $7E0506
+	AND.w #$0080
+	BEQ .done
+	LDA.l $7E0000+!SwapCooldown
+	BNE .done
+	LDA.w #20
+	STA.l $7E0000+!SwapCooldown
+	LDA.l $7E0000+!P2Swap
+	EOR.w #$0001
+	STA.l $7E0000+!P2Swap
+	LDA.w #120
+	STA.l $7E0000+!TagTimer
+.done
 	RTL
 
 print "Bloque animales termina en: ", pc

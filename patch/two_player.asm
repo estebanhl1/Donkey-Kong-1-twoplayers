@@ -1,18 +1,21 @@
 ; =============================================================================
-; DKC1 (USA 1.0) - 2 jugadores simultaneos  (v0.2)
+; DKC1 (USA 1.0) - 2 jugadores simultaneos  (v1.2)
 ;
-; Jugar en modo "One player". Ver docs/MAPA_MEMORIA.md para las direcciones.
+; Co-op: elegir "Two player team". Ver docs/MAPA_MEMORIA.md para las direcciones.
 ;
 ; Reglas:
 ;   - El P2 se "une" apretando cualquier boton. Si no toca el control por
 ;     !IdleFrames frames, se "va": el juego vuelve a ser el original (P1 maneja
 ;     al lider, el companero lo sigue solo, A intercambia Kongs).
-;   - Con el P2 unido el control es fijo: P1 = DK, P2 = Diddy (sea quien sea el
-;     lider; la camara sigue al lider).
+;   - Con el P2 unido el control es por Kong: P1 = DK, P2 = Diddy. Con A
+;     (cualquiera de los dos) se intercambian los personajes.
 ;   - Con el P2 unido, si falta un Kong, reaparece a los !RespawnFrames frames
 ;     junto al lider (misma animacion que al salir de un barril DK).
-;   - El companero controlado no mueve la camara, no sale de la pantalla y si
-;     queda muy lejos en vertical (hoyo) reaparece en el lider.
+;   - El companero controlado no sale de la pantalla y si queda muy lejos en
+;     vertical reaparece en el lider. Si cae a un hoyo no se pierde vida.
+;   - Lo que el juego reserva al lider (cuerdas, barriles canon y de bonus,
+;     paredes de bonus, puertas de salida): si lo toca el Kong del companero,
+;     pasa a ser el lider (traspaso) y el juego sigue normal.
 ;
 ; Ensamblar:  ./build.sh   (aplica este archivo sobre una copia de la ROM)
 ; =============================================================================
@@ -39,6 +42,8 @@ hirom
 !SprTimer1375 = $1375        ; temporizador/uso general por sprite (0x0E lo usa de espera)
 !SprMask11A1  = $11A1        ; mascara de colision por sprite
 !KongFreeze   = $1929        ; bits: 1 = camara quieta, 2/8/$10 = congela enemigos
+!SprOnGround  = $12A5        ; bit 0 = pisando suelo
+!SprOAMZ      = $0B8D        ; prioridad de dibujo del sprite
 !KongEvent    = $1E2B        ; evento para el lider: 1 victoria, 2 fracaso, 3/4 otros
 !RopeAvailV   = $1AFD        ; cuerda vertical disponible (la pone la cuerda, solo para el lider)
 !RopeAvailS   = $1AFF        ; cuerda que se balancea disponible
@@ -67,6 +72,16 @@ hirom
 !SaveEvent     = $04FA       ; $1E2B guardado mientras se procesa al companero
 !SaveLeadX     = $04FC
 !SaveLeadY     = $04FE       ; X del lider guardada mientras se calcula la camara compartida
+!P2Swap        = $04C4       ; 1 = personajes intercambiados con A (P1 = Diddy, P2 = DK)
+!SwapCooldown  = $04C6       ; frames de espera entre dos intercambios
+!StuckAir      = $04CA       ; frames con el companero en estado 1 (aire) pero apoyado en el suelo
+!FollowT       = $04CC       ; frames con el companero (P2 unido) siguiendo al lider (estado 2)
+!LeadGroundT   = $04C8       ; frames seguidos con el lider en el suelo (estado 0)
+!DKBox         = $04B0       ; caja de colision de DK ($C5-$CC) guardada antes de procesar a Diddy (4 palabras)
+!OtherBox      = $04A0       ; caja de Diddy mientras se revisan las bananas con la de DK (4 palabras)
+!DKBoxValid    = $04BA       ; 1 = !DKBox es de este frame
+!BananaToggle  = $04BC       ; alterna la caja usada para las bananas sueltas
+!TagTimer      = $04BE       ; frames que quedan mostrando "1"/"2" sobre los Kongs
 !TouchMode     = $04F8       ; CODE_BBA64A: 0 normal (lider y luego companero), 1 solo lider, 2 solo companero
 
 ; --- Ajustes -----------------------------------------------------------------
@@ -191,6 +206,7 @@ org $CA7000
 P2_DiddyEntry:
 	LDA.w #$0002
 	STA.b !KongType
+	JSR P2_SaveDKBox
 	BRA P2_Common
 
 P2_DKEntry:
@@ -210,6 +226,20 @@ P2_Common:
 	LDX.b !CurIndex
 	JSR P2_RepairRide
 	JSR P2_UpdateJoin
+	JSR P2_LeadAirborne
+	BCC +
+	STZ.w !LeadGroundT           ; lider en el aire / colgado / en un barril
+	BRA ++
++
+	LDA.w !LeadGroundT
+	CMP.w #$00FF
+	BCS ++
+	INC.w !LeadGroundT
+++
+	LDA.w !SwapCooldown
+	BEQ +
+	DEC.w !SwapCooldown
++
 	JSR P2_LeadMountWatch
 	JSR P2_UpdateRespawn
 	PLB
@@ -306,13 +336,39 @@ P2_Common:
 	LDX.b !CurIndex
 	; ---- P2 unido: el companero se controla como un jugador ----
 	LDA.w !SprState,x
-	CMP.w #$0002                 ; suelo: caminando detras del lider
-	BEQ .take_control
-	CMP.w #$0005                 ; suelo: parado detras del lider
-	BEQ .take_control
+	CMP.w #$0002
+	BEQ +
+	STZ.w !FollowT
++
+	LDA.w !SprState,x
+	CMP.w #$0002                 ; caminando detras del lider
+	BEQ .follower
+	CMP.w #$0005                 ; parado detras del lider
+	BEQ .follower
 	CMP.w #$0036                 ; agua: nadando detras del lider
 	BNE .run
 	LDA.w #$002B                 ; -> nadando controlado
+	STA.w !SprState,x
+	BRA .run
+.follower
+	; Mientras el lider va en el aire (p.ej. saltando desde una cuerda o tras un
+	; barril) el companero lo sigue como en el original. Despues se le devuelve
+	; el control en estado 1 (aire, con gravedad): si ya pisa suelo aterriza al
+	; frame siguiente. (Antes quedaba en 0 en pleno aire: flotaba/se deslizaba.)
+	LDA.w !SprState,x
+	CMP.w #$0005                 ; parado detras del lider: control directo
+	BEQ .take_control
+	INC.w !FollowT
+	LDA.w !FollowT               ; como mucho ~1.5 s siguiendo (si el lider salta sin parar)
+	CMP.w #90
+	BCS +
+	LDA.w !LeadGroundT           ; caminando/saltando detras (estado 2): esperar a
+	CMP.w #30                    ; que el lider lleve ~0.5 s en el suelo (el companero
+	BCS +                        ; recorre su mismo camino con retraso)
+	JMP .original
++
+	STZ.w !FollowT
+	LDA.w #$0001
 	STA.w !SprState,x
 	BRA .run
 .take_control
@@ -388,6 +444,25 @@ P2_Common:
 	STA.w !PartnerFlags
 .no_hurt
 
+	; Companero en estado 1 (aire) pero apoyado en el suelo: si se lo puso en 1
+	; estando ya en el suelo, el juego nunca lo "aterriza" y queda en la pose de
+	; caida, deslizandose y sin poder saltar ("patinando"). En un salto normal
+	; esto dura a lo sumo 1 frame; si dura 3, aterrizarlo como hace el juego.
+	LDX.b !CurIndex
+	LDA.w !SprState,x
+	CMP.w #$0001
+	BNE .air_ok
+	LDA.w !SprOnGround,x
+	AND.w #$0001
+	BEQ .air_ok
+	INC.w !StuckAir
+	LDA.w !StuckAir
+	CMP.w #3
+	BCC .air_done
+	STZ.w !SprState,x
+.air_ok
+	STZ.w !StuckAir
+.air_done
 	; Borde de pantalla / reaparicion solo mientras se controla normalmente
 	; (no durante el golpe y la huida).
 	LDX.b !CurIndex
@@ -440,6 +515,8 @@ P2_UpdateJoin:
 	LDA.w !P2Joined
 	BNE +
 	JSR P2_JoinGiveAnimal        ; recien se une
+	LDA.w #120                   ; mostrar "1"/"2" sobre los Kongs ~2 s
+	STA.w !TagTimer
 +
 	LDA.w #$0001
 	STA.w !P2Joined
@@ -452,10 +529,12 @@ P2_UpdateJoin:
 	LDA.w !PartnerFlags
 	AND.w #$0001
 	BNE +
-	LDA.w !CurrentKong
-	CMP.w #$0001                 ; DK lidera y no hay companero -> falta Diddy
-	BNE +
-	STZ.w !P2IdleTimer
+	LDA.w #$0002                 ; Kong del P2: 2 = Diddy, 1 = DK si intercambiaron
+	SEC
+	SBC.w !P2Swap
+	CMP.w !CurrentKong
+	BEQ +                        ; el Kong del P2 es el lider: esta presente
+	STZ.w !P2IdleTimer           ; falta el Kong del P2
 	RTS
 +
 	INC.w !P2IdleTimer
@@ -472,6 +551,11 @@ P2_UpdateJoin:
 ; Se llama desde el lider (CurIndex = lider). (DB = $7E)
 ; -----------------------------------------------------------------------------
 P2_UpdateRespawn:
+	BRA .start
+.reset
+	STZ.w !RespawnTimer
+	RTS
+.start
 	LDA.w !P2Joined
 	BNE +
 	LDA.w !GameMode              ; en co-op siempre (empezar con los dos Kongs)
@@ -481,6 +565,19 @@ P2_UpdateRespawn:
 	LDA.w !PartnerFlags
 	AND.w #$0001
 	BNE .reset                   ; ya hay companero
+	; Etapas de bonus de animales (fichas): se juega con un solo animal y sin
+	; el otro Kong, como en el original. No traerlo.
+	LDA.b $3E                    ; entrada actual
+	CMP.w #$00D2                 ; Rambi
+	BEQ .reset
+	CMP.w #$00D3                 ; Winky
+	BEQ .reset
+	CMP.w #$006C                 ; Expresso
+	BEQ .reset
+	CMP.w #$00A6                 ; Enguarde
+	BEQ .reset
+	CMP.w #$0034                 ; (prueba de fichas)
+	BEQ .reset
 	LDA.w !CurrentKong
 	BEQ .reset
 	CMP.w #$0003
@@ -491,23 +588,40 @@ P2_UpdateRespawn:
 	LDA.w !SprState,x
 	CMP.w #$000C                 ; esperar a que termine de huir (0x0C = ausente)
 	BNE .done
+	; El contador avanza con el lider "libre", se pausa si esta ocupado (cuerda,
+	; barril canon, etc.) y vuelve a 0 solo si el lider muere, desaparece o
+	; cambia de cuarto. (Si no se reiniciaba al morir, la reaparicion podia
+	; dispararse mientras el juego saca al Kong del barril estrella: congelado.)
 	LDX.b !CurIndex
 	LDA.w !SprState,x
-	CMP.w #$0002
-	BCC .count                   ; lider en el suelo (0) o en el aire (1)
-	CMP.w #$002B                 ; lider nadando
-	BEQ .count
-	CMP.w #$0014                 ; lider montando un animal
-	BEQ .count
-	CMP.w #$0030                 ; lider montando a Enguarde
-	BEQ .count
-	CMP.w #$0015
-	BNE .done
+	JSR P2_LeadGone
+	BCS .reset
+	LDA.w !SprState,x
+	JSR P2_IsFreeState           ; libre (incluye cargar un barril)
+	BCS .count
+	CMP.w #$0022                 ; agachado
+	BNE .done                    ; ocupado: pausa
 .count
-	INC.w !RespawnTimer
 	LDA.w !RespawnTimer
 	CMP.w #!RespawnFrames
-	BCC .done
+	BCS +
+	INC.w !RespawnTimer
+	BRA .done
++
+	; tiempo cumplido: sacar al Kong solo con el lider a pie, en el aire,
+	; nadando o montando (como siempre); si no, esperar
+	LDA.w !SprState,x
+	CMP.w #$0002
+	BCC .release
+	CMP.w #$002B
+	BEQ .release
+	CMP.w #$0014
+	BEQ .release
+	CMP.w #$0015
+	BEQ .release
+	CMP.w #$0030
+	BNE .done
+.release
 	STZ.w !RespawnTimer
 
 	; Llamar a la rutina JSR/RTS del banco BF desde aqui:
@@ -533,9 +647,6 @@ P2_UpdateRespawn:
 	STA.b !KongType
 .done
 	RTS
-.reset
-	STZ.w !RespawnTimer
-	RTS
 
 ; -----------------------------------------------------------------------------
 ; Si el companero esta demasiado lejos en vertical del lider, lo traemos
@@ -548,9 +659,24 @@ P2_KeepNearLead:
 	LDA.w !SprYPos,x
 	SEC
 	SBC.w !SprYPos,y
-	BPL +
+	BPL .above                   ; companero mas arriba que el lider
 	EOR.w #$FFFF
 	INC
+	BRA +
+.above
+	; El lider esta mas abajo: si va en el aire (p.ej. cayendo a un hoyo) no
+	; arrastrar al companero con el (si cae al hoyo, el otro pasa a lider).
+	PHA
+	LDA.w !SprState,y
+	CMP.w #$0001
+	BEQ .lead_air
+	CMP.w #$0015
+	BEQ .lead_air
+	CMP.w #$0019
+	BEQ .lead_air
+	CMP.w #$001A
+	BEQ .lead_air
+	PLA
 +
 	CMP.w #!MaxYDist
 	BCC .ok
@@ -572,8 +698,12 @@ P2_KeepNearLead:
 	CMP.w #$001B
 	BCC .ok
 +
-	STZ.w !SprState,x
+	LDA.w #$0001                 ; en el aire: cae con gravedad (0 en el aire = flota)
+	STA.w !SprState,x
 .ok
+	RTS
+.lead_air
+	PLA
 	RTS
 
 ; -----------------------------------------------------------------------------
@@ -614,7 +744,11 @@ P2_ClampToScreen:
 P2_SelectPad:
 	LDA.l $7E0000+!P2Joined
 	BEQ .by_role
-	LDY.b !KongType
+	LDA.l $7E0000+!P2Swap        ; 0: DK -> control 1, Diddy -> control 2
+	ASL                          ; 1: al reves
+	EOR.b !KongType
+	TAY
+	JSR P2_CartShareB
 	RTL
 .by_role
 	LDA.b !KongType
@@ -675,6 +809,33 @@ P2_TouchPlayer:
 	SEC
 	RTL
 .no
+	; El lider no lo toca. Barril canon / pared de bonus: si los toca el Kong
+	; del P2, pasa a ser el lider (asi puede entrar a bonus y barriles).
+	LDX.b !CurIndex
+	LDA.l $7E0000+!SprID,x
+	CMP.w #$0014
+	BEQ +
+	CMP.w #$0038
+	BNE .no2
++
+	JSR P2_PartnerIsPlayer
+	BCC .no2
+	JSL $809B9C                  ; Y = lider
+	TYA
+	EOR.w #$0006
+	PHA                          ; [companero]
+	INC
+	INC
+	STA.b $88
+	JSL $BBA594
+	PLA
+	BCC .no2
+	CMP.b $88
+	BNE .no2
+	JSR P2_Handoff
+	BCC .no2
+	RTL                          ; carry = 1, $88 = el nuevo lider
+.no2
 	CLC
 	RTL
 
@@ -735,6 +896,8 @@ P2_SpawnAnimal:
 	LDA.l $7E0000+!GameMode      ; en co-op siempre (aunque el P2 no este tocando el control)
 	CMP.w #$0001
 	BNE .done
+	JSL P2_TooManyAnimals        ; ya hay 2 (contando el recien creado): no crear el segundo
+	BCS .done
 	PHY
 	JSL $BF8148                  ; liberar recursos de video si hace falta (como el original)
 	REP #$30
@@ -954,7 +1117,9 @@ P2_RoomLoad:
 ; -----------------------------------------------------------------------------
 P2_GiveBackAnimal:
 	LDA.w !P2GivePending
-	BEQ .done
+	BNE +
+	RTS
++
 	DEC.w !P2GiveTimeout
 	BEQ .cancel
 	LDA.w !PartnerFlags
@@ -970,6 +1135,11 @@ P2_GiveBackAnimal:
 	CMP.w #$0005
 	BNE .done
 .go
+	JSL P2_TooManyAnimals        ; ya hay 2 animales: no crear otro; si hay uno libre
+	BCC +                        ; cerca, dejarlo caer encima (lo monta el juego)
+	JSL P2_DropOnFreeAnimal
+	JMP .cancel
++
 	LDA.w !P2SavedAnimal
 	LDY.w #!DATA_RambiBox
 	CMP.w #$0009
@@ -1310,7 +1480,23 @@ P2_CameraShared:
 P2_SwapFilter:
 	LDA.l $7E0000+!P2Joined
 	BEQ .original
-	JML $BFB840                  ; RTS en el banco BF -> no intercambiar
+	; Con el P2 jugando: A intercambia que Kong maneja cada jugador (sin mover
+	; a nadie). Solo con los dos Kongs presentes; espera entre intercambios
+	; para que el mismo A no lo deshaga al leerlo el otro Kong.
+	LDA.l $7E0000+!PartnerFlags
+	AND.w #$0001
+	BEQ .no
+	LDA.l $7E0000+!SwapCooldown
+	BNE .no
+	LDA.w #20
+	STA.l $7E0000+!SwapCooldown
+	LDA.l $7E0000+!P2Swap
+	EOR.w #$0001
+	STA.l $7E0000+!P2Swap
+	LDA.w #120                   ; mostrar "1"/"2" sobre los Kongs ~2 s
+	STA.l $7E0000+!TagTimer
+.no
+	JML $BFB840                  ; RTS en el banco BF -> no intercambiar a los Kongs
 .original
 	LDX.b !CurIndex              ; instrucciones reemplazadas
 	LDA.l $7E0000+!SprState,x
@@ -1414,5 +1600,802 @@ P2_LeadMountWatch:
 	RTS
 
 print "Codigo nuevo termina en: ", pc
+warnpc $CA79E0                ; ahi empieza la pantalla inicial (splash.asm)
 
 incsrc splash.asm             ; pantalla inicial (dedicatoria + link del repo)
+
+; =============================================================================
+; Indicador sobre cada Kong (~2 s al intercambiar con A, al unirse el P2 o al
+; cambiar el lider): "1" / "2" = que jugador lo maneja, y una banana girando
+; sobre el lider ("el que manda"). Usa graficos del contador de bananas que ya
+; estan en VRAM: digitos (tiles $66+d arriba, $76+d abajo) y la banana del HUD
+; ($1E0.., 16x16), con la paleta del HUD ($0531, reservada al cargar el nivel).
+; Se agrega al buffer de OAM justo despues del dibujo de las bananas sueltas.
+; (espacio libre $F2FE52-$F2FFFF)
+; =============================================================================
+!PrevLeadTag   = $04C2       ; lider del frame anterior (para mostrar el indicador al cambiar)
+
+org $F2FE60
+P2_BananasAndTags:
+	; el indicador va ANTES que las bananas sueltas: si hay muchas, el buffer de
+	; OAM se llena y el indicador no alcanzaba a dibujarse
+	REP #$30
+	JSR .tags
+	JSL P2_Bananas
+	RTL
+
+.tags
+	LDA.l $7E0000+!CurrentKong   ; cambio de lider -> mostrar el indicador
+	CMP.l $7E0000+!PrevLeadTag
+	BEQ +
+	STA.l $7E0000+!PrevLeadTag
+	LDA.w #120
+	STA.l $7E0000+!TagTimer
++
+	LDA.l $7E0000+!TagTimer
+	BEQ .done
+	DEC
+	STA.l $7E0000+!TagTimer
+	LDA.l $7E0000+!P2Joined
+	BEQ .done
+	LDA.l $7E0000+!PartnerFlags  ; solo con los dos Kongs
+	AND.w #$0001
+	BEQ .done
+	LDX.w #$0002                 ; DK
+	JSR .one
+	LDX.w #$0004                 ; Diddy
+	JSR .one
+.done
+	RTS
+
+.one                             ; X = indice del Kong
+	LDA.l $7E0000+!SprState,x
+	CMP.w #$000C                 ; ausente / escondido
+	BNE ++
+	JMP .r
+++
+	; digito = jugador que lo maneja: (KongType EOR intercambio*2) / 2 + 1
+	LDA.l $7E0000+!P2Swap
+	ASL
+	STA.b $76
+	TXA
+	DEC
+	DEC
+	EOR.b $76
+	LSR
+	INC
+	STA.b $78                    ; 1 o 2
+	; X en pantalla (centro del Kong)
+	LDA.l $7E0000+!SprXPos,x
+	SEC
+	SBC.l $7E088B                ; Layer1XPos
+	SEC
+	SBC.w #$0008
+	CMP.w #$00F0
+	BCC ++
+	JMP .r
+++
+	STA.b $7A                    ; X - 8
+	; Y en pantalla: $4A - Y - Layer1YPos (pies); el digito 0x40 mas arriba
+	LDA.b $4A
+	SEC
+	SBC.l $7E0000+!SprYPos,x
+	SEC
+	SBC.l $7E0895
+	SEC
+	SBC.w #$0040
+	CMP.w #$00D0
+	BCS .r
+	CMP.w #$0012
+	BCC .r                       ; muy arriba (no cabe la banana)
+	STA.b $7C                    ; Y del digito
+	LDY.b $8E                    ; siguiente entrada libre del buffer de OAM
+	CPY.w #$03F0
+	BCS .r
+	; digito (2 entradas de 8x8)
+	LDA.b $7C
+	XBA
+	ORA.b $7A
+	CLC
+	ADC.w #$0004                 ; digito centrado (X - 4)
+	STA.w $0000,y
+	CLC
+	ADC.w #$0800
+	STA.w $0004,y
+	LDA.b $78
+	CLC
+	ADC.w #$0066
+	ORA.l $7E0531
+	STA.w $0002,y
+	ORA.w #$0010
+	STA.w $0006,y
+	LDA.w #$0000                 ; chicos
+	JSR .hi
+	INY
+	INY
+	INY
+	INY
+	LDA.w #$0000
+	JSR .hi
+	INY
+	INY
+	INY
+	INY
+	; lider: banana girando arriba del digito (16x16)
+	TXA
+	LSR
+	CMP.l $7E0000+!CurrentKong
+	BNE .end
+	LDA.b $7C
+	SEC
+	SBC.w #$0011
+	XBA
+	ORA.b $7A
+	STA.w $0000,y
+	LDA.b $28
+	LSR
+	AND.w #$000E
+	CLC
+	ADC.w #$01E0
+	ORA.l $7E0531
+	STA.w $0002,y
+	LDA.w #$0002                 ; grande
+	JSR .hi
+	INY
+	INY
+	INY
+	INY
+.end
+	STY.b $8E
+.r
+	RTS
+
+; tabla alta del OAM para la entrada en Y: A = bits (0 chico / 2 grande; X < 256)
+.hi
+	PHY
+	PHX
+	STA.b $76
+	TYA
+	SEC
+	SBC.w #$0200
+	LSR
+	LSR                          ; n = numero de entrada
+	PHA
+	AND.w #$0003
+	ASL
+	TAX                          ; desplazamiento (0,2,4,6)
+	LDA.w #$FFFC
+-	CPX.w #$0000
+	BEQ +
+	SEC
+	ROL
+	ASL.b $76
+	DEX
+	BRA -
++
+	STA.b $72                    ; mascara
+	PLA
+	LSR
+	LSR
+	CLC
+	ADC.w #$0400
+	TAY
+	SEP #$20
+	LDA.w $0000,y
+	AND.b $72
+	ORA.b $76
+	STA.w $0000,y
+	REP #$20
+	PLX
+	PLY
+	RTS
+
+print "Indicador termina en: ", pc
+warnpc $F30000
+
+; =============================================================================
+; v1.2: traspaso de liderazgo, salidas y cuerdas para el Kong del P2
+; (espacio libre $CA6C70-$CA6FFF)
+; =============================================================================
+org $BFD970                  ; salida de nivel (sprite $13): JSL CODE_809B9C
+	JSL P2_Exit13
+org $B6C46B                  ; puerta de salida $6A (estado 0): JSL CODE_809B9C
+	JSL P2_ExitDoor
+org $B6C3EB                  ; puerta de salida bajo el agua $6B (estado 0)
+	JSL P2_ExitDoorWater
+org $BFEF0C                  ; cuerda vertical $30: JSL CODE_809B9C
+	JSL P2_RopeV
+org $B68002                  ; cuerda que se balancea $31: JSL CODE_809B9C
+	JSL P2_RopeS
+
+org $BFA6C9                  ; caida a un hoyo (CODE_BFA6C9): LDA $1E15 / AND #$0020
+	JSL P2_PitFall
+	NOP
+	NOP
+
+org $B8B524                  ; dibujo y recoleccion de bananas sueltas: JSL CODE_B8B89F
+	JSL P2_BananasAndTags        ; bananas + indicador 1/2 (ver "Indicador")
+
+org $CA6C70
+; -----------------------------------------------------------------------------
+; Bananas sueltas. CODE_B8B89F las dibuja y revisa si las toca la caja de
+; colision que dejo el ULTIMO Kong procesado ($C5-$CC): con los dos Kongs
+; controlados siempre era la de Diddy, asi que DK nunca juntaba bananas.
+; En co-op, un frame se revisa con la caja de Diddy y el siguiente con la de DK.
+; -----------------------------------------------------------------------------
+P2_SaveDKBox:                ; (entrada de Diddy: DK ya se proceso este frame)
+	LDA.l $7E0000+!P2Joined
+	BEQ .no
+	LDA.l $7E0000+!PartnerFlags
+	AND.w #$0001
+	BEQ .no
+	LDA.b $C5
+	STA.l $7E0000+!DKBox
+	LDA.b $C7
+	STA.l $7E0000+!DKBox+2
+	LDA.b $C9
+	STA.l $7E0000+!DKBox+4
+	LDA.b $CB
+	STA.l $7E0000+!DKBox+6
+	LDA.w #$0001
+	BRA +
+.no
+	LDA.w #$0000
++
+	STA.l $7E0000+!DKBoxValid
+	RTS
+
+P2_Bananas:
+	LDA.l $7E0000+!DKBoxValid
+	BEQ .plain
+	LDA.w #$0000
+	STA.l $7E0000+!DKBoxValid
+	LDA.l $7E0000+!BananaToggle
+	EOR.w #$0001
+	STA.l $7E0000+!BananaToggle
+	BEQ .plain
+	; frame de DK: guardar la caja de Diddy y poner la de DK
+	LDA.b $C5
+	STA.l $7E0000+!OtherBox
+	LDA.b $C7
+	STA.l $7E0000+!OtherBox+2
+	LDA.b $C9
+	STA.l $7E0000+!OtherBox+4
+	LDA.b $CB
+	STA.l $7E0000+!OtherBox+6
+	LDA.l $7E0000+!DKBox
+	STA.b $C5
+	LDA.l $7E0000+!DKBox+2
+	STA.b $C7
+	LDA.l $7E0000+!DKBox+4
+	STA.b $C9
+	LDA.l $7E0000+!DKBox+6
+	STA.b $CB
+	JSL $B8B89F
+	REP #$30
+	LDA.l $7E0000+!OtherBox
+	STA.b $C5
+	LDA.l $7E0000+!OtherBox+2
+	STA.b $C7
+	LDA.l $7E0000+!OtherBox+4
+	STA.b $C9
+	LDA.l $7E0000+!OtherBox+6
+	STA.b $CB
+	RTL
+.plain
+	JSL $B8B89F
+	RTL
+
+; -----------------------------------------------------------------------------
+; Vagoneta: el lider va en el carro ($2E / $2F) y el otro Kong escondido. Con el
+; P2 jugando, el B de cualquiera de los dos controles hace saltar el carro (se
+; suma el B del otro control al del lider, como el truco del modo team).
+; Y = control del Kong actual (0/2). Preserva X e Y. (DB del juego)
+; -----------------------------------------------------------------------------
+P2_CartShareB:
+	PHX
+	LDX.b !CurIndex
+	LDA.w !SprState,x
+	CMP.w #$002E
+	BEQ +
+	CMP.w #$002F
+	BNE .done
++
+	TYA
+	EOR.w #$0002
+	TAX                          ; X = el otro control
+	LDA.w $0504,x                ; recien apretados del otro control
+	AND.w #$8000                 ; B
+	ORA.w $0504,y
+	STA.w $0504,y
+	LDA.w $0500,x                ; mantenidos
+	AND.w #$8000
+	ORA.w $0500,y
+	STA.w $0500,y
+.done
+	PLX
+	RTS
+
+; -----------------------------------------------------------------------------
+; Caida a un hoyo. El juego pone al Kong en $3B, congela la camara ($1929 = 1)
+; y descuenta una vida (CODE_B6A856). En co-op, si el que cae es el companero
+; y el lider no esta cayendo, solo desaparece (como tras un golpe) y reaparece
+; a los ~3 s: sin perder vida ni congelar nada. Si cae el lider y el otro Kong
+; (jugado por el P2) esta libre, el otro pasa a ser el lider y pasa lo mismo.
+; Si no, lo original.
+; -----------------------------------------------------------------------------
+P2_PitFall:
+	LDA.l $7E0000+!GameMode
+	CMP.w #$0001
+	BNE .original
+	LDA.l $7E0000+!PartnerFlags
+	AND.w #$0001
+	BEQ .original                ; no hay companero: el que cae es el ultimo
+	JSL $809B9C                  ; Y = lider
+	CPY.b !CurIndex
+	BNE .partner_falls
+	; Cae el lider: si el otro Kong lo juega el P2 y esta libre, pasa a ser el
+	; lider (traspaso) y el que cayo desaparece como un companero.
+	JSR P2_Handoff
+	BCC .original
+	BRA .gone
+.partner_falls
+	LDA.w !SprState,y
+	CMP.w #$003B
+	BEQ .original
+.gone
+	LDX.b !CurIndex
+	LDA.w #$000C                 ; companero ausente
+	STA.w !SprState,x
+	STZ.w !SprXSpeed,x
+	STZ.w !SprYSpeed,x
+	LDY.b !KongType
+	LDA.w #$0000
+	STA.w $0512,y                ; ya no monta su animal
+	LDA.l $7E0000+!PartnerFlags
+	AND.w #$FFFE
+	STA.l $7E0000+!PartnerFlags
+	SEP #$20
+	PLA                          ; sacar la vuelta del JSL (3 bytes)
+	PLA
+	PLA
+	REP #$20
+	JML $BFA6C2                  ; RTS de la rutina original (vuelve a quien la llamo)
+.original
+	LDA.l $7E1E15                ; instrucciones reemplazadas
+	AND.w #$0020
+	RTL
+
+; -----------------------------------------------------------------------------
+; Traspaso: el companero (jugado por el P2) pasa a ser el lider. Lo usa el juego
+; cuando el lider recibe un golpe; aca, cuando el companero toca algo que solo
+; atiende al lider (salida, bonus, barril canon, cuerda). Solo si los dos estan
+; libres y el juego no esta congelado. Carry = 1 si se hizo. Preserva X e Y.
+; (cualquier DB: todo con direcciones largas)
+; -----------------------------------------------------------------------------
+P2_Handoff:
+	PHX
+	PHY
+	JSR P2_PartnerIsPlayer
+	BCC .no
+	LDA.l $7E0000+!KongFreeze
+	BNE .no
+	LDA.l $7E0000+!CurrentKong   ; (1 o 2: lo valido P2_PartnerIsPlayer)
+	ASL
+	TAX                          ; X = lider
+	LDA.l $7E0000+!SprState,x
+	JSR P2_IsFreeState
+	BCC .no
+	TXA
+	EOR.w #$0006
+	TAX                          ; X = companero
+	LDA.l $7E0000+!SprState,x
+	JSR P2_IsFreeState
+	BCC .no
+	; prioridad de dibujo: el lider va adelante (como hace el juego)
+	LDA.l $7E0000+!SprOAMZ,x
+	PHA
+	TXA
+	EOR.w #$0006
+	TAX                          ; X = lider
+	LDA.l $7E0000+!SprOAMZ,x
+	PHA
+	LDA $03,s
+	STA.l $7E0000+!SprOAMZ,x
+	TXA
+	EOR.w #$0006
+	TAX                          ; X = companero
+	PLA
+	STA.l $7E0000+!SprOAMZ,x
+	PLA
+	LDA.l $7E0000+!CurrentKong
+	EOR.w #$0003
+	STA.l $7E0000+!CurrentKong
+	; recordar si el nuevo lider va montado (P2_LeadMountWatch no debe creer
+	; que recien se subio a un animal)
+	LDA.l $7E0000+!SprState,x
+	LDY.w #$0001
+	CMP.w #$0014
+	BEQ +
+	CMP.w #$0015
+	BEQ +
+	CMP.w #$0030
+	BEQ +
+	LDY.w #$0000
++
+	TYA
+	STA.l $7E0000+!PrevLeadRide
+	PLY
+	PLX
+	SEC
+	RTS
+.no
+	PLY
+	PLX
+	CLC
+	RTS
+
+; Carry = 1 si el lider ($82 = lider, DB = $7E) va por el aire: saltando (con o
+; sin animal o barril), colgado de una cuerda, en un barril canon o la vagoneta saltando.
+P2_LeadAirborne:
+	LDX.b !CurIndex
+	LDA.w !SprState,x
+	CMP.w #$0001
+	BEQ .yes
+	CMP.w #$0015
+	BEQ .yes
+	CMP.w #$0019
+	BEQ .yes
+	CMP.w #$001A
+	BEQ .yes
+	CMP.w #$0025
+	BEQ .yes
+	CMP.w #$0026
+	BEQ .yes
+	CMP.w #$0028
+	BEQ .yes
+	CMP.w #$0029
+	BEQ .yes
+	CMP.w #$002F
+	BEQ .yes
+	CLC
+	RTS
+.yes
+	SEC
+	RTS
+
+; Carry = 1 si el estado A del lider es de muerte, ausencia o cambio de cuarto.
+P2_LeadGone:
+	CMP.w #$000B
+	BEQ .yes
+	CMP.w #$0011
+	BEQ .yes
+	CMP.w #$003B
+	BEQ .yes
+	CMP.w #$003F
+	BEQ .yes
+	CMP.w #$000C
+	BEQ .yes
+	CMP.w #$000D
+	BEQ .yes
+	CMP.w #$0009
+	BEQ .yes
+	CMP.w #$0054
+	BEQ .yes
+	CMP.w #$0032
+	BEQ .yes
+	CMP.w #$0046
+	BCC .no
+	CMP.w #$0049                 ; $46-$48: entrando o saliendo de un cuarto
+	BCC .yes
+.no
+	CLC
+	RTS
+.yes
+	SEC
+	RTS
+
+; Carry = 1 si el estado A es "libre" (a pie, en el aire, nadando, montando o
+; cargando un barril).
+P2_IsFreeState:
+	CMP.w #$0002
+	BCC .yes
+	CMP.w #$002B
+	BEQ .yes
+	CMP.w #$0014
+	BEQ .yes
+	CMP.w #$0015
+	BEQ .yes
+	CMP.w #$0030
+	BEQ .yes
+	CMP.w #$0017
+	BCC .no
+	CMP.w #$001B
+	BCC .yes
+.no
+	CLC
+	RTS
+.yes
+	SEC
+	RTS
+
+; -----------------------------------------------------------------------------
+; Salida de nivel (sprite $13, CODE_BFD970). Devuelve Y = Kong a revisar: el
+; lider, o el companero si el esta en la caja de salida y el lider no (traspaso).
+; -----------------------------------------------------------------------------
+P2_Exit13:
+	JSL $809B9C                  ; Y = lider
+	JSR P2_PartnerIsPlayer
+	BCC .done
+	LDX.b !CurIndex
+	JSR .inbox
+	BCS .done                    ; el lider esta en la salida: original
+	TYA
+	EOR.w #$0006
+	TAY                          ; Y = companero
+	JSR .inbox
+	BCC .back
+	JSR P2_Handoff
+	BCS .done                    ; Y = companero, ahora lider
+.back
+	TYA
+	EOR.w #$0006
+	TAY                          ; Y = lider
+.done
+	RTL
+
+; carry = Kong Y dentro de la caja de la salida X (misma prueba que el juego) y en el suelo
+.inbox
+	LDA.w !SprXPos,x
+	SEC
+	SBC.w #$0008
+	CMP.w !SprXPos,y
+	BPL .out
+	CLC
+	ADC.w #$0010
+	CMP.w !SprXPos,y
+	BMI .out
+	LDA.w !SprYPos,x
+	SEC
+	SBC.w #$0008
+	CMP.w !SprYPos,y
+	BPL .out
+	CLC
+	ADC.w #$0010
+	CMP.w !SprYPos,y
+	BMI .out
+	LDA.w !SprOnGround,y
+	AND.w #$0001
+	BEQ .out
+	SEC
+	RTS
+.out
+	CLC
+	RTS
+
+; -----------------------------------------------------------------------------
+; Puerta de salida $6A (CODE_B6C45C): se activa cuando el lider pasa la X de la
+; puerta, a menos de 5 px en vertical y en el suelo. Igual para el companero.
+; -----------------------------------------------------------------------------
+P2_ExitDoor:
+	JSL $809B9C
+	JSR P2_PartnerIsPlayer
+	BCC .done
+	LDX.b !CurIndex
+	LDA.w !SprXPos,y
+	CMP.w !SprXPos,x
+	BPL .done                    ; el lider ya paso: original
+	TYA
+	EOR.w #$0006
+	TAY                          ; companero
+	LDA.w !SprXPos,y
+	CMP.w !SprXPos,x
+	BMI .back
+	LDA.w !SprYPos,y
+	SEC
+	SBC.w !SprYPos,x
+	BPL +
+	EOR.w #$FFFF
+	INC
++
+	CMP.w #$0005
+	BPL .back
+	LDA.w !SprOnGround,y
+	AND.w #$0001
+	BEQ .back
+	JSR P2_Handoff
+	BCS .done
+.back
+	TYA
+	EOR.w #$0006
+	TAY
+.done
+	RTL
+
+; Puerta de salida bajo el agua $6B (CODE_B6C3EB): basta con pasar su X.
+P2_ExitDoorWater:
+	JSL $809B9C
+	JSR P2_PartnerIsPlayer
+	BCC .done
+	LDX.b !CurIndex
+	LDA.w !SprXPos,y
+	CMP.w !SprXPos,x
+	BPL .done
+	TYA
+	EOR.w #$0006
+	TAY
+	LDA.w !SprXPos,y
+	CMP.w !SprXPos,x
+	BMI .back
+	JSR P2_Handoff
+	BCS .done
+.back
+	TYA
+	EOR.w #$0006
+	TAY
+.done
+	RTL
+
+; -----------------------------------------------------------------------------
+; Cuerdas. Las cuerdas solo se ofrecen al lider ($1AFD / $1AFF). Si el Kong del
+; P2 salta a una cuerda (estado 1) y el lider no esta colgado, primero se prueba
+; la cuerda con el companero (misma rutina del juego) y, si la alcanza, pasa a
+; ser el lider: el juego lo cuelga y el otro sube detras, como en el original.
+; -----------------------------------------------------------------------------
+P2_RopeV:                    ; cuerda vertical (CODE_BFEF0C, rutina JSR del banco BF)
+	JSR P2_RopeCandidate         ; carry = probar; Y = companero
+	BCC .lead
+	LDA.w $1AFD
+	PHA
+	STZ.w $1AFD
+	PHY
+	PHK
+	PEA.w .back-1
+	PEA.w (!RTL_InBankBF&$FFFF)-1
+	CLC                          ; como deja el acarreo CODE_809B9C (CODE_B6FC84 puede
+	JML $BFEF10                  ; volver sin tocarlo) -- resto de la rutina con Y = companero
+.back
+	REP #$30
+	PLY
+	LDA.w $1AFD
+	BEQ +
+	JSR P2_Handoff
++
+	PLA
+	STA.w $1AFD
+.lead
+	JSL $809B9C                  ; Y = lider (el nuevo, si hubo traspaso)
+	RTL
+
+P2_RopeS:                    ; cuerda que se balancea (CODE_B68000, DB = $B6, RTL)
+	JSR P2_RopeCandidate
+	BCC .lead
+	LDA.w $1AFF
+	PHA
+	PHY
+	PHK
+	PEA.w .back-1
+	JML $B68006                  ; resto de la rutina con Y = companero (carry = la alcanza)
+.back
+	REP #$30
+	PLY
+	BCC +
+	JSR P2_Handoff
++
+	PLA
+	STA.w $1AFF
+	LDX.b !CurIndex
+.lead
+	JSL $809B9C
+	RTL
+
+; carry = 1 si conviene probar la cuerda con el companero; Y = companero
+P2_RopeCandidate:
+	JSR P2_PartnerIsPlayer
+	BCC .no
+	LDA.l $7E0000+!CurrentKong
+	ASL
+	TAX                          ; X = lider
+	LDA.l $7E0000+!SprState,x
+	CMP.w #$0025
+	BEQ .no                      ; el lider ya esta colgado
+	CMP.w #$0026
+	BEQ .no
+	TXA
+	EOR.w #$0006
+	TAY
+	TAX
+	LDA.l $7E0000+!SprState,x
+	CMP.w #$0001                 ; companero en el aire
+	BNE .no
+	LDX.b !CurIndex
+	SEC
+	RTS
+.no
+	LDX.b !CurIndex
+	CLC
+	RTS
+
+print "Bloque v1.2 termina en: ", pc
+warnpc $CA7000
+
+; =============================================================================
+; Animales: limite de 2 (espacio libre $D2FE8C-$D2FFFF)
+; =============================================================================
+org $D2FE90
+; Carry = 1 si ya hay 2 o mas animales (Rambi/Expresso/Winky/Enguarde) libres
+; o montados (no los que huyen tras un golpe). Preserva X e Y.
+P2_TooManyAnimals:
+	PHX
+	PHY
+	LDY.w #$0000
+	LDX.w #$0006
+-	LDA.l $7E0000+!SprID,x
+	CMP.w #$0009
+	BCC +
+	CMP.w #$000D
+	BCS +
+	LDA.l $7E0000+!SprState,x
+	CMP.w #$0002                 ; 0 libre / 1 montado
+	BCS +
+	INY
++
+	INX
+	INX
+	CPX.w #$0034
+	BNE -
+	CPY.w #$0002                 ; carry = (cuenta >= 2)
+	PLY
+	PLX
+	RTL
+
+; El companero ($82) se deja caer sobre un animal libre a menos de $80 px en X
+; (si hay): queda en el aire encima y el juego lo monta al caer.
+P2_DropOnFreeAnimal:
+	PHX
+	PHY
+	LDY.b !CurIndex              ; Y = companero
+	LDX.w #$0006
+-	LDA.l $7E0000+!SprID,x
+	CMP.w #$0009
+	BCC .next
+	CMP.w #$000D
+	BCS .next
+	LDA.l $7E0000+!SprState,x
+	BNE .next                    ; solo libres
+	LDA.l $7E0000+!SprXPos,x
+	SEC
+	SBC.w !SprXPos,y
+	BPL +
+	EOR.w #$FFFF
+	INC
++
+	CMP.w #$0080
+	BCS .next
+	; encontrado: companero encima del animal
+	LDA.l $7E0000+!SprXPos,x
+	STA.w !SprXPos,y
+	LDA.l $7E0000+!SprYPos,x
+	CLC
+	ADC.w #$0028
+	STA.w !SprYPos,y
+	LDA.w #$0001
+	STA.w !SprState,y
+	LDA.w #$FC00
+	STA.w !SprYSpeed,y
+	LDA.w #$0000
+	STA.w !SprXSpeed,y
+	BRA .done
+.next
+	INX
+	INX
+	CPX.w #$0034
+	BNE -
+.done
+	PLY
+	PLX
+	RTL
+
+print "Bloque animales termina en: ", pc
+warnpc $D30000
+

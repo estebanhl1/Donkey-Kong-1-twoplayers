@@ -174,6 +174,16 @@ Más espacio: buscar `%FREE_BYTES` en `disasm/DKC1/Routine_Macros_DKC1.asm`.
 | `$04FC` / `$04FE` | ⟵ nuestro: X/Y del líder guardadas mientras se calcula la cámara compartida |
 | `$04D2` | ⟵ nuestro: control 2 leído del hardware el frame anterior (pausa) |
 | `$04F8` | ⟵ nuestro: `TouchMode` de `CODE_BBA64A` (0 normal, 1 solo líder, 2 solo compañero) |
+| `$04C0` | ⟵ nuestro: `$5A` mientras se muestra la pantalla inicial (`patch/splash.asm`; los tests la saltan) |
+| `$04C4` | ⟵ nuestro: personajes intercambiados con A (0: P1 = DK / P2 = Diddy; 1: al revés) |
+| `$04C6` | ⟵ nuestro: espera entre dos intercambios con A (20 frames) |
+| `$04C8` | ⟵ nuestro: frames seguidos con el líder en el suelo (no en el aire / cuerda / barril) |
+| `$04CA` | ⟵ nuestro: frames con el compañero en estado 1 pero apoyado en el suelo |
+| `$04A0`-`$04A7` | ⟵ nuestro: caja de Diddy mientras se revisan las bananas con la de DK |
+| `$04B0`-`$04B7` | ⟵ nuestro: caja de colisión de DK (`$C5`-`$CC`) guardada antes de procesar a Diddy |
+| `$04BA` / `$04BC` | ⟵ nuestro: caja de DK válida este frame / alternancia de la caja para bananas |
+| `$04BE` / `$04C2` | ⟵ nuestro: frames del indicador 1/2 / líder del frame anterior (para mostrarlo al cambiar) |
+| `$04CC` | ⟵ nuestro: frames con el compañero siguiendo al líder (estado 2); a los 90 recupera el control |
 | `$04FA` | ⟵ nuestro: `$1E2B` guardado mientras se procesa al compañero |
 | `$04D8-$04DD` | ⟵ nuestro: copias de `$1AFD`/`$1AFF`/`$1B01` mientras se procesa al compañero |
 | `$04E0-$04EB` | ⟵ nuestro: copias temporales mientras se procesa al compañero (cámara, índice, estado, `$1375`, `$11A1` del líder y `$1929`) |
@@ -245,7 +255,10 @@ Más espacio: buscar `%FREE_BYTES` en `disasm/DKC1/Routine_Macros_DKC1.asm`.
   Al aterrizar, el P2 recupera el control. Los barriles con marca de Kong (`$3000`) aceptan a los dos.
 
 ## 6b. Objetos y choques (verificado 2026-11-19)
-- **Bananas sueltas**: las recoge también el compañero. ✅
+- **Bananas sueltas** (v1.2.2, corregido): las dibuja y recoge `CODE_B8B89F` (llamada en `$B8B524`), una vez por frame,
+  con la caja de colisión que dejó en `$C5`-`$CC` el **último Kong procesado** (Diddy va después de DK). Con los dos Kongs
+  controlados, solo contaba Diddy: DK nunca juntaba bananas. **Parche:** al entrar Diddy se guarda la caja de DK (`$04B0`)
+  y `P2_Bananas` usa en frames alternados la de Diddy y la de DK (`$04BC`). No se puede llamar dos veces: también dibuja.
 - **Objetos que son sprites** (racimo `$15`, letra KONG `$16`, globo `$34`, ficha `$45`): solo el líder, porque `CODE_BBA574` acepta solo al líder. ✅
 - Con el parche v0.3 (`CODE_BBA574` acepta a ambos Kongs si el P2 está unido) el compañero recoge racimos y letras ✅. Para el golpe, ver 6a.
 
@@ -278,7 +291,7 @@ en el emulador las combinaciones funcionan para los dos jugadores (verificado 20
 - `$1B01`: índice de la cuerda agarrada. `CODE_BF881C` pone `$25` (vertical) y `CODE_BF8861` pone `$26` (balanceo).
 - `CODE_BF8584` (estados 0/1) **borra las tres al pisar suelo**. Con el P2 eso le soltaba la cuerda al líder.
   **Parche:** se guardan y restauran alrededor del procesamiento del compañero.
-- Seguidor (estado 2): líder en `$26` → `$33`; líder en `$25` → `$34`. **Parche:** con el líder colgado, el compañero suelto pasa a `$02` y sube detrás. El P2 no puede colgarse solo (limitación).
+- Seguidor (estado 2): líder en `$26` → `$33`; líder en `$25` → `$34`. **Parche:** con el líder colgado, el compañero suelto pasa a `$02` y sube detrás. Desde v1.2 el P2 también puede colgarse solo (traspaso, ver 6f-bis).
 - Estado `$22`: agachado.
 
 ## 6g. Plataformas (verificado 2026-11-19)
@@ -303,6 +316,47 @@ en el emulador las combinaciones funcionan para los dos jugadores (verificado 20
 - Dumb Drum: los Klumps solo los vence DK (regla del juego). Bumble B: barriles. K. Rool: pisotón vía `CODE_BFC6C9`.
 - Rebote "enemigo duro": estado del Kong `$0F` (`CODE_BFA803`).
 
+## 6f-bis. Traspaso de líder, hoyos y estado 1 en el suelo (v1.2, verificado 2026-11-19)
+- **Traspaso** (`P2_Handoff`): si el compañero jugado por el P2 toca algo que el juego solo atiende al líder,
+  se invierte `$056F` (`EOR #3`) y se intercambia la prioridad de dibujo (`$0B8D,x`), como hace `CODE_BF8E48`.
+  Solo si los dos están "libres" (0/1, `$2B`, `$14`/`$15`, `$30`, `$17`-`$1A`) y `$1929` = 0.
+  Ganchos: `CODE_BBA574` (barril cañón `$38` y pared de bonus `$14`), puerta de salida `$6A` (`$B6C46B`),
+  puerta bajo el agua `$6B` (`$B6C3EB`), salida `$13` (`$BFD970`), cuerda vertical (`$BFEF0C`) y liana (`$B68002`).
+  Los niveles normales terminan con la puerta `$6A` (probado en Stop & Go, Ropey Rampage, Trick Track Trek).
+- Cuerdas: la rutina de la cuerda se corre primero con Y = compañero (si está en el aire y el líder no está colgado).
+  ⚠ `CODE_B6FC84` puede volver **sin tocar el acarreo**: hay que entrar con carry = 0 (como deja `CODE_809B9C`).
+- Al agarrar la cuerda justo en la punta inferior el Kong se resbala (comportamiento normal del juego).
+- **Estado 1 apoyado en el suelo:** si se pone a un Kong en 1 estando ya en el suelo, el juego nunca lo aterriza
+  (pose de caída, se desliza, no puede saltar). Le pasaba al compañero (era el "patinando"). En un salto normal
+  la combinación estado 1 + bit 0 de `$12A5` dura a lo sumo 1 frame; el parche aterriza al compañero si dura 3.
+- **Seguir (estado 2):** el seguidor no actualiza `$12A5`. El parche le devuelve el control (estado 1) recién
+  cuando el líder lleva 30 frames sin estar en el aire (`$04C8`), o tras 90 frames siguiendo (`$04CC`, si el líder salta sin parar).
+- **Hoyo** (`CODE_BFA6C9`): pone `$3B`, `$1929 = 1` y descuenta una vida (`CODE_B6A856`). **Parche** `P2_PitFall`:
+  en co-op, si cae el compañero y el líder no, pasa a `$0C` sin perder vida ni tocar `$1929`.
+- **Reaparición:** el contador `$04F4` avanza con el líder libre, se pausa si está ocupado y vuelve a 0 solo si el
+  líder muere, desaparece o cambia de cuarto (`P2_LeadGone`). Cumplido el tiempo, saca al Kong con el líder en 0/1/`$2B`/`$14`/`$15`/`$30`.
+  En las etapas de bonus de animales (entradas `$D2` Rambi, `$D3` Winky, `$6C` Expresso, `$A6` Enguarde) no se trae al otro Kong:
+  el original juega con un solo Kong montado y el otro ausente.
+- (v1.2, reemplazado) el contador `$04F4` se reiniciaba si el líder no estaba libre. Antes, si el último Kong moría con el
+  contador casi lleno, la reaparición se disparaba durante la salida del barril estrella y el juego se congelaba.
+
+## 6f-ter. v1.3: indicador, vagoneta y caída del líder (verificado 2026-11-19)
+- **Indicador** (`P2_BananasAndTags`, `$F2FE60`, espacio libre `$F2FE52-$F2FFFF`): se agrega al buffer de OAM (`$0200`, siguiente
+  entrada en `$8E`, tabla alta en `$0400`) después de las bananas sueltas. Dígitos del contador: tile `$66+d` arriba y `$76+d` abajo
+  (8×8 cada uno); banana del HUD `$1E0 + ($28/2 & $E)` (16×16). Paleta del HUD en `$0531` (se reserva al cargar el nivel, `CODE_B8B580`).
+  Pantalla: X = X − `$088B`; Y = `$4A` − Y − `$0895` (pies del Kong).
+- **Vagoneta:** `P2_CartShareB` (desde `P2_SelectPad`) suma el B del otro control al del líder en `$2E`/`$2F`
+  (`$0500`/`$0504` = mantenidos/recién apretados del control 1, `+2` control 2). El original trae algo parecido como truco del modo team (`CODE_BFB27C`).
+- **Caída del líder:** `P2_KeepNearLead` traía al compañero junto al líder si se separaban más de `$D0` en vertical, en las dos
+  direcciones: si el líder caía a un hoyo, arrastraba al otro y se perdía una vida. Ahora no lo hace si el líder está más abajo y en el aire;
+  `P2_PitFall` hace el traspaso si cae el líder y el otro está libre.
+
+- **Límite de animales** (`P2_TooManyAnimals`, `$D2FE90`): no se crea un animal para el compañero (devolución, unirse,
+  líder que se sube) ni el segundo de una caja si ya hay 2 animales libres o montados (los que huyen, estado 2, no cuentan).
+  Si el compañero a pie tiene un animal libre a menos de `$80` px, se lo deja caer encima (`P2_DropOnFreeAnimal`).
+  Antes, bajarse y volver a subirse sumaba un animal cada vez.
+- **Indicador:** se dibuja ANTES que las bananas sueltas (si no, con muchas bananas el buffer de OAM se llenaba).
+
 ## 6j. Cámara, pausa, intercambio y ralentización (verificado 2026-11-19)
 - **Cámara:** `CODE_809BEC` decide qué Kong sigue (Y = líder, salvo `$1E29`).
   - `CODE_809CD0` calcula la X objetivo (`$1A5E`) con `XPos,y`, `XSpeed,y`, `$0DB9,y` y la anticipación `$1A69`.
@@ -311,7 +365,8 @@ en el emulador las combinaciones funcionan para los dos jugadores (verificado 20
   - **Parche** (`$809C43`, `P2_Camera`): con el compañero jugado por el P2 se reemplaza por un momento la X y la Y del líder por el **punto medio** de los dos Kongs.
     Junto con el borde de pantalla del compañero, los dos quedan siempre a la vista. RTL útil en el banco `$80`: `$809B9F`.
 - **Intercambio con A:** A del Kong → `CODE_BFB830` (según `$180F`) → `CODE_BFB838`: montado = bajarse; a pie = `CODE_BFBF8E` (intercambio).
-  **Parche:** `P2_SwapFilter` no intercambia con el P2 unido (sale por el RTS `$BFB840`).
+  **Parche:** con el P2 unido, `P2_SwapFilter` no intercambia a los Kongs: invierte `$04C4` (qué control maneja
+  cada Kong, ver `P2_SelectPad`) y sale por el RTS `$BFB840`. Solo con los dos Kongs presentes.
 - **Pausa:** la pone `CODE_BFBEEC` (Start del Kong; bit `$40` de `$0579`) y la quita `CODE_809B15` mirando `$0510`.
   Durante la pausa el juego **no lee el control 2**. **Parche** (`$809B1B`, `P2_PausePressed`): suma el Start recién apretado del P2, leído del hardware (`$421A`; anterior en `$04D2`).
 - **Ralentización:** `$28`/`$2A` cuentan vueltas del bucle principal (`CODE_8080AB`).

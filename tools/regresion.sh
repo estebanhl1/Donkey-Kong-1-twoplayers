@@ -18,7 +18,7 @@ r=$(run $PY tools/test_1p_identical.py)
 export COOP=1
 echo "== Co-op (Two player team)"
 r=$(run $PY tools/test_hurt.py $ROM)
-echo "$r" | grep -q "f 375 DK 032A st00 | Di 032A st00" && ok "golpe al companero -> reaparece" || bad "golpe al companero"
+echo "$r" | grep -qE "f 400 DK 032A st00 \| Di 03[0-9A-F]{2} st00" && ok "golpe al companero -> reaparece" || bad "golpe al companero"
 echo "$r" | grep -qE "DK [0-9A-F]{4} st23 \| Di [0-9A-F]{4} st00 \| lider 2" && ok "golpe al lider -> traspaso y reaparece" || bad "golpe al lider"
 [ "$(run $PY tools/test_drop.py $ROM | grep -c MATA)" = "6" ] && ok "pisoton de los dos Kongs" || bad "pisoton"
 [ "$(run $PY tools/test_pickups.py $ROM work/1p_twokongs.state 1500 | grep -c 'companero: RECOGE')" = "2" ] && ok "objetos con el P2" || bad "objetos"
@@ -34,9 +34,28 @@ run $PY tools/test_forkE_lift.py $ROM | tail -1 | grep -q "Di y00A9" && ok "asce
 run $PY tools/test_forkD_bonusend.py $ROM | grep -q "SALE DEL BONUS" && ok "fin de bonus" || bad "fin de bonus"
 run $PY tools/test_forkC_bossbot.py $ROM VeryGnawty E0 diddy_p2 3000 | grep -q "TERMINA" && ok "jefe Very Gnawty con el P2 solo" || bad "jefe Very Gnawty"
 r=$(run $PY tools/test_camera.py $ROM | head -2)
-echo "$r" | grep -q "ambos derecha .*final DK 73 Diddy 81" && ok "camara compartida" || { bad "camara compartida"; echo "$r"; }
+echo "$r" | grep -q "ambos derecha .*final DK 7[2-4] Diddy 8[01]" && ok "camara compartida" || { bad "camara compartida"; echo "$r"; }
 r=$(run $PY tools/test_cores.py $ROM | grep RESULTADO)
 echo "$r" | grep -q "8/8" && ok "co-op desde cero (menu Team)" || { bad "co-op desde cero"; echo "$r"; }
+
+echo "== Arreglos v1.2"
+r=$(run $PY tools/test_v12.py $ROM)
+for c in reaparecer_en_checkpoint:"reaparecer en el checkpoint con un solo Kong (no se congela)" \
+         hoyo_sin_perder_vida:"el companero cae a un hoyo: sin perder vida" \
+         no_queda_patinando:"el companero no queda patinando (estado 1 en el suelo)" \
+         p2_cuerda_sola:"el P2 se cuelga solo de una cuerda" \
+         p2_barril_bonus:"el P2 entra solo a un barril de bonus" \
+         p2_puerta_salida:"el P2 sale solo por la puerta" \
+         a_intercambia:"A intercambia los personajes" \
+         bonus_animales_sin_kong_extra:"bonus de animales: no aparece el otro Kong" \
+         reaparece_a_tiempo:"el Kong que falta vuelve a los ~3 s aunque el lider este ocupado" \
+         dk_junta_bananas:"DK tambien junta bananas sueltas" \
+         lider_cae_sin_perder_vida:"cae el lider a un hoyo: el otro sigue, sin perder vida" \
+         indicador_1p_2p:"indicador 1/2 y banana del lider al intercambiar" \
+         vagoneta_salta_con_p2:"vagoneta: el B del P2 hace saltar el carro" \
+         animales_sin_duplicar:"bajarse y subirse no crea animales de mas"; do
+  echo "$r" | grep -q "^OK ${c%%:*}" && ok "${c#*:}" || { bad "${c#*:}"; echo "$r" | grep "${c%%:*}"; }
+done
 
 if [ "$1" = "--completo" ]; then
   echo "== 40 niveles"

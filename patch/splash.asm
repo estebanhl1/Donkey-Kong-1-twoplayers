@@ -19,7 +19,7 @@
 org $808000                  ; reset: CLC / XCE / SEI / REP #$20
 	JML Splash               ; 4 bytes; el operando de REP ($808004) queda sin ejecutar
 
-org $CA7900
+org $CA79E0
 Splash:
 	SEI
 	CLC
@@ -207,6 +207,7 @@ SplashPal:
 	dw $1841, $5294, $0000, $0000   ; 5: gris
 SplashPalEnd:
 
+print "Pantalla inicial termina en: ", pc
 warnpc $CA7C00
 org $CA7C00
 incsrc splash_font.asm

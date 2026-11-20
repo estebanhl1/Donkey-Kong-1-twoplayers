@@ -41,12 +41,28 @@ Estado: ✅ hecho · ⬜ pendiente · ❓ hay que verificar cómo se comporta ho
 - ✅ v1.0.1: en co-op siempre salen 2 animales; el Kong del P2 se sube solo al suyo (también si el P2 se une tarde o DK monta después)
 - ✅ 3.2 Vagonetas: el compañero va escondido y salta con el líder, como en el original; el reinicio tras perder una vida es correcto
 
+- ✅ v1.1: pantalla inicial con dedicatoria y link del repo (`patch/splash.asm`)
+- ✅ v1.2 (bugs reportados jugando, 2026-11-19):
+  - Juego congelado al reaparecer en el barril estrella tras morir con un solo Kong (el contador de reaparición no se reiniciaba al morir)
+  - Kong del P2 "patinando" (pose de caída, deslizándose sin poder saltar): quedaba en estado 1 apoyado en el suelo; ahora se aterriza
+  - Al soltarse el líder de una cuerda, el Kong del P2 caía al hoyo: ahora lo sigue hasta que aterrizan
+  - El P2 puede colgarse solo de cuerdas/lianas, entrar solo a barriles cañón y de bonus, romper paredes de bonus y salir por la puerta del final (traspaso de líder)
+  - A intercambia los personajes entre los jugadores
+  - Que el compañero caiga a un hoyo ya no cuesta una vida
+- ✅ v1.2.1: en las etapas de bonus de animales (Rambi, Winky, Expresso, Enguarde) ya no aparece el otro Kong (se ponía lento);
+  el Kong que falta vuelve a los ~3 s aunque el líder esté ocupado un rato (antes el contador volvía a cero)
+- ✅ v1.2.2: DK también junta bananas sueltas (el juego solo revisaba la caja del último Kong procesado, Diddy)
+- ✅ v1.3: si cae el líder a un hoyo, el otro sigue (antes el rescate vertical lo arrastraba al hoyo y se perdía una vida);
+  indicador 1/2 + banana del líder; en la vagoneta salta el carro con el B de cualquiera de los dos
+- ✅ v1.3.1: bajarse y subirse a los animales ya no crea animales de más (máximo 2); el indicador se dibuja antes que las bananas
+
 ## Revisión de mundos (2026-11-19)
 40 niveles de los 6 mundos, jefes y Gangplank Galleon (`tools/survey.py`): en todos están los 2 Kongs, el P2 mueve al suyo y nada se congela.
 
 ## Limitaciones conocidas
-- El P2 no puede colgarse solo de una cuerda (sube detrás del líder).
-- El P2 no puede entrar solo a un barril cañón (entra con el líder).
+- Mientras un Kong está colgado de una cuerda, el otro sube detrás de él (no puede usar otra cuerda a la vez).
+- El que entra primero a un barril cañón se lleva al otro adentro.
+- Las vagonetas siguen siendo solo del líder.
 - En Torchlight Trouble la luz de Squawks sigue al líder.
 - Dumb Drum: los Klumps solo los vence DK (regla del juego original).
 
